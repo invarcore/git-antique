@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import operator
 import time
+
 from git_antique.partitioner import (
     classify_python_file_diff,
     length_prefixed_utf8,

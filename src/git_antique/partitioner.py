@@ -12,8 +12,9 @@ import hashlib
 import json
 import operator
 import unicodedata
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Any
 
 
 def nfc_normalize(value: str) -> str:
@@ -57,7 +58,7 @@ def rfc8785_sha256(payload: Any) -> str:
 class _CosmeticStripper(ast.NodeTransformer):
     """Tier 0 Normalizer: strips docstrings and sorts contiguous top-level imports."""
 
-    def _strip_docstring(self, body: List[ast.stmt]) -> List[ast.stmt]:
+    def _strip_docstring(self, body: list[ast.stmt]) -> list[ast.stmt]:
         if (
             body
             and isinstance(body[0], ast.Expr)
@@ -105,7 +106,7 @@ class _IsomorphicNormalizer(_CosmeticStripper):
 
     def __init__(self) -> None:
         super().__init__()
-        self._scope_stack: List[Dict[str, str]] = []
+        self._scope_stack: list[dict[str, str]] = []
 
     def _canonical_local(self, name: str, allow_bind: bool) -> str:
         if not self._scope_stack:
@@ -121,7 +122,7 @@ class _IsomorphicNormalizer(_CosmeticStripper):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
         node.returns = None
-        scope: Dict[str, str] = {}
+        scope: dict[str, str] = {}
         self._scope_stack.append(scope)
         try:
             for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
@@ -134,7 +135,7 @@ class _IsomorphicNormalizer(_CosmeticStripper):
                 node.args.kwarg.annotation = None
                 node.args.kwarg.arg = self._canonical_local(node.args.kwarg.arg, allow_bind=True)
             node.body = self._strip_docstring(node.body)
-            new_body: List[ast.stmt] = []
+            new_body: list[ast.stmt] = []
             for stmt in node.body:
                 visited = self.visit(stmt)
                 if isinstance(visited, ast.stmt):
@@ -185,7 +186,7 @@ class FilePartitionVerdict:
 
 @dataclass(frozen=True)
 class AntiquePartitionReceipt:
-    files: Tuple[FilePartitionVerdict, ...]
+    files: tuple[FilePartitionVerdict, ...]
     total_changed_lines: int
     total_human_attention_lines: int
     attention_compression_ratio: float
@@ -272,21 +273,12 @@ def classify_python_file_diff(filepath: str, before_src: str, after_src: str) ->
     )
 
 
-def partition_pull_request(file_pairs: Sequence[Tuple[str, str, str]]) -> AntiquePartitionReceipt:
-    verdicts = tuple(
-        classify_python_file_diff(path, before, after)
-        for path, before, after in file_pairs
-    )
+def partition_pull_request(file_pairs: Sequence[tuple[str, str, str]]) -> AntiquePartitionReceipt:
+    verdicts = tuple(classify_python_file_diff(path, before, after) for path, before, after in file_pairs)
     total_changed = sum(v.changed_lines for v in verdicts)
     total_attention = sum(v.human_attention_lines for v in verdicts)
-    compression = (
-        round(1.0 - (total_attention / total_changed), 4)
-        if operator.gt(total_changed, 0)
-        else 1.0
-    )
-    requires_review = any(
-        v.classification == "SEMANTIC_LOGIC_MUTATION" for v in verdicts
-    )
+    compression = round(1.0 - (total_attention / total_changed), 4) if operator.gt(total_changed, 0) else 1.0
+    requires_review = any(v.classification == "SEMANTIC_LOGIC_MUTATION" for v in verdicts)
     canonical_payload = {
         "files": [
             {
