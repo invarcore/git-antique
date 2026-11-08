@@ -33,11 +33,12 @@ def verify_safe_git_ref(ref: str) -> str:
     return norm
 
 
-def collect_git_branch_python_pairs(
+def collect_git_branch_diff_pairs(
     repo_dir: str,
     base_ref: str,
     head_ref: str,
     runner: Callable[[Sequence[str], str], bytes] | None = None,
+    python_only: bool = False,
 ) -> list[tuple[str, str, str]]:
     safe_base = verify_safe_git_ref(base_ref)
     safe_head = verify_safe_git_ref(head_ref)
@@ -52,7 +53,12 @@ def collect_git_branch_python_pairs(
         repo_dir,
     )
     null_sep = bytes([0])
-    paths = [p.decode("utf-8", errors="replace") for p in raw_names.split(null_sep) if p and p.endswith(b".py")]
+    raw_paths = [p.decode("utf-8", errors="replace") for p in raw_names.split(null_sep) if p]
+    if python_only:
+        paths = [p for p in raw_paths if p.endswith(".py")]
+    else:
+        paths = raw_paths
+
     pairs: list[tuple[str, str, str]] = []
     for rel_path in sorted(paths):
         if rel_path.startswith("-") or ".." in rel_path.split("/"):
@@ -71,11 +77,29 @@ def collect_git_branch_python_pairs(
     return pairs
 
 
+def collect_git_branch_python_pairs(
+    repo_dir: str,
+    base_ref: str,
+    head_ref: str,
+    runner: Callable[[Sequence[str], str], bytes] | None = None,
+) -> list[tuple[str, str, str]]:
+    return collect_git_branch_diff_pairs(
+        repo_dir, base_ref, head_ref, runner=runner, python_only=True
+    )
+
+
 def render_antique_markdown_summary(receipt: AntiquePartitionReceipt) -> str:
     pipe = chr(124)
     nl = chr(10)
     pct = round(receipt.attention_compression_ratio * 100.0, 1)
-    status = "REVIEW REQUIRED" if receipt.requires_human_logic_review else "AUTO-APPROVABLE (ZERO LOGIC DIFF)"
+    has_non_python = any(f.classification == "UNANALYZED_NON_PYTHON" for f in receipt.files)
+    if receipt.requires_human_logic_review:
+        if has_non_python and not any(f.classification == "SEMANTIC_LOGIC_MUTATION" for f in receipt.files):
+            status = "REVIEW REQUIRED (UNANALYZED NON-PYTHON ASSETS DETECTED)"
+        else:
+            status = "REVIEW REQUIRED"
+    else:
+        status = "AUTO-APPROVABLE (ZERO LOGIC DIFF)"
     lines = [
         f"### git-antique Semantic Diff Receipt (`{receipt.receipt_id}`)",
         f"- **Gate Verdict**: **{status}**",
@@ -99,10 +123,13 @@ def main(
     parser.add_argument("--repo", default=".", help="Path to Git repository")
     parser.add_argument("--base", default="main", help="Base Git revision")
     parser.add_argument("--head", default="HEAD", help="Head Git revision")
+    parser.add_argument("--python-only", action="store_true", help="Only inspect Python files")
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     args = parser.parse_args(argv)
 
-    pairs = collect_git_branch_python_pairs(args.repo, args.base, args.head, runner=runner)
+    pairs = collect_git_branch_diff_pairs(
+        args.repo, args.base, args.head, runner=runner, python_only=args.python_only
+    )
     receipt = partition_pull_request(pairs)
     if args.format == "json":
         print(json.dumps(asdict(receipt), indent=2))

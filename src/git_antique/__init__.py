@@ -5,6 +5,7 @@
 
 from git_antique.cli import (
     UnsafeGitRefError,
+    collect_git_branch_diff_pairs,
     collect_git_branch_python_pairs,
     render_antique_markdown_summary,
     verify_safe_git_ref,
@@ -28,6 +29,7 @@ __all__ = [
     "UnsafeGitRefError",
     "ast_canonical_dump",
     "classify_python_file_diff",
+    "collect_git_branch_diff_pairs",
     "collect_git_branch_python_pairs",
     "count_changed_diff_lines",
     "length_prefixed_utf8",

@@ -5,6 +5,7 @@ import pytest
 
 from git_antique.cli import (
     UnsafeGitRefError,
+    collect_git_branch_diff_pairs,
     collect_git_branch_python_pairs,
     main,
     render_antique_markdown_summary,
@@ -130,6 +131,42 @@ def test_main_cli_markdown_and_json(capsys) -> None:
     captured_json = capsys.readouterr()
     assert '"receipt_id":' in captured_json.out
 
+    # Test --python-only flag
+    exit_code_py_only = main(
+        ["--base", "main", "--head", "HEAD", "--python-only", "--format", "markdown"],
+        runner=fake_git,
+    )
+    assert exit_code_py_only == 0
+
     # Test default subprocess runner path on current checkout HEAD vs HEAD (works on shallow clones)
     exit_code_real = main(["--base", "HEAD", "--head", "HEAD", "--format", "markdown"])
     assert exit_code_real == 0
+
+
+def test_collect_diff_pairs_with_non_python_and_markdown_summary() -> None:
+    def fake_git(cmd, cwd: str) -> bytes:
+        if "diff" in cmd:
+            return (
+                b"src/clean.py"
+                + bytes([0])
+                + b"ci.yml"
+                + bytes([0])
+            )
+        if "clean.py" in cmd[2]:
+            return b"def f(): pass\n"
+        if "ci.yml" in cmd[2]:
+            return b"name: CI\n"
+        return b""
+
+    # Default collect_git_branch_diff_pairs includes non-python
+    pairs = collect_git_branch_diff_pairs("/tmp/repo", "main", "HEAD", runner=fake_git)
+    assert len(pairs) == 2
+    assert pairs[0][0] == "ci.yml"
+    assert pairs[1][0] == "src/clean.py"
+
+    receipt = partition_pull_request(pairs)
+    assert receipt.requires_human_logic_review is True
+    md = render_antique_markdown_summary(receipt)
+    assert "REVIEW REQUIRED (UNANALYZED NON-PYTHON ASSETS DETECTED)" in md
+    assert "`ci.yml`" in md
+    assert "`UNANALYZED_NON_PYTHON`" in md

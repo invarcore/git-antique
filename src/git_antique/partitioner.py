@@ -256,6 +256,18 @@ def classify_python_file_diff(filepath: str, before_src: str, after_src: str) ->
     after_sha = hashlib.sha256(norm_after.encode("utf-8")).hexdigest()
     changed_lines = count_changed_diff_lines(norm_before, norm_after)
 
+    if not filepath.endswith(".py"):
+        return FilePartitionVerdict(
+            filepath=filepath,
+            classification="UNANALYZED_NON_PYTHON",
+            changed_lines=changed_lines,
+            human_attention_lines=changed_lines,
+            before_sha256=before_sha,
+            after_sha256=after_sha,
+            tier0_ast_digest="NON_PYTHON",
+            tier1_ast_digest="NON_PYTHON",
+        )
+
     try:
         t0_before = ast_canonical_dump(norm_before, tier=0)
         t0_after = ast_canonical_dump(norm_after, tier=0)
@@ -317,7 +329,7 @@ def partition_pull_request(file_pairs: Sequence[tuple[str, str, str]]) -> Antiqu
     total_changed = sum(v.changed_lines for v in verdicts)
     total_attention = sum(v.human_attention_lines for v in verdicts)
     compression = round(1.0 - (total_attention / total_changed), 4) if operator.gt(total_changed, 0) else 1.0
-    requires_review = any(v.classification == "SEMANTIC_LOGIC_MUTATION" for v in verdicts)
+    requires_review = any(v.classification in ("SEMANTIC_LOGIC_MUTATION", "UNANALYZED_NON_PYTHON") for v in verdicts)
     canonical_payload = {
         "files": [
             {
