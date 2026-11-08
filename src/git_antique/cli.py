@@ -83,9 +83,7 @@ def collect_git_branch_python_pairs(
     head_ref: str,
     runner: Callable[[Sequence[str], str], bytes] | None = None,
 ) -> list[tuple[str, str, str]]:
-    return collect_git_branch_diff_pairs(
-        repo_dir, base_ref, head_ref, runner=runner, python_only=True
-    )
+    return collect_git_branch_diff_pairs(repo_dir, base_ref, head_ref, runner=runner, python_only=True)
 
 
 def render_antique_markdown_summary(receipt: AntiquePartitionReceipt) -> str:
@@ -127,9 +125,7 @@ def main(
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     args = parser.parse_args(argv)
 
-    pairs = collect_git_branch_diff_pairs(
-        args.repo, args.base, args.head, runner=runner, python_only=args.python_only
-    )
+    pairs = collect_git_branch_diff_pairs(args.repo, args.base, args.head, runner=runner, python_only=args.python_only)
     receipt = partition_pull_request(pairs)
     if args.format == "json":
         print(json.dumps(asdict(receipt), indent=2))

@@ -146,12 +146,7 @@ def test_main_cli_markdown_and_json(capsys) -> None:
 def test_collect_diff_pairs_with_non_python_and_markdown_summary() -> None:
     def fake_git(cmd, cwd: str) -> bytes:
         if "diff" in cmd:
-            return (
-                b"src/clean.py"
-                + bytes([0])
-                + b"ci.yml"
-                + bytes([0])
-            )
+            return b"src/clean.py" + bytes([0]) + b"ci.yml" + bytes([0])
         if "clean.py" in cmd[2]:
             return b"def f(): pass\n"
         if "ci.yml" in cmd[2]:
