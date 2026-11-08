@@ -1,7 +1,7 @@
 # Copyright 2026 Invarcore Organization
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic Two-Tier Semantic AST Diff Router and RFC 8785 Receipt Generator."""
+"""Deterministic Two-Tier AST Diff Partitioner and RFC 8785 Receipt Router (v2)."""
 
 from __future__ import annotations
 
@@ -56,7 +56,12 @@ def rfc8785_sha256(payload: Any) -> str:
 
 
 class _CosmeticStripper(ast.NodeTransformer):
-    """Tier 0 Normalizer: strips docstrings and sorts contiguous top-level imports."""
+    """Tier 0 Normalizer (v2 Hardened):
+
+    - Strips module/class/function docstrings.
+    - Sorts ONLY contiguous leading top-level Import statements at the start of a module
+      (P0-2 fix: never hoists late imports across executable statements with side effects).
+    """
 
     def _strip_docstring(self, body: list[ast.stmt]) -> list[ast.stmt]:
         if (
@@ -70,15 +75,20 @@ class _CosmeticStripper(ast.NodeTransformer):
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         self.generic_visit(node)
-        node.body = self._strip_docstring(node.body)
-        imports = [s for s in node.body if isinstance(s, ast.Import)]
-        others = [s for s in node.body if not isinstance(s, ast.Import)]
-        if imports:
+        body = self._strip_docstring(node.body)
+        leading_imports: list[ast.Import] = []
+        idx = 0
+        while operator.lt(idx, len(body)) and isinstance(body[idx], ast.Import):
+            leading_imports.append(body[idx])
+            idx += 1
+        if leading_imports:
             all_aliases = sorted(
-                (a for imp in imports for a in imp.names),
+                (a for imp in leading_imports for a in imp.names),
                 key=lambda a: (a.name, a.asname or ""),
             )
-            node.body = [ast.Import(names=all_aliases)] + others
+            node.body = [ast.Import(names=all_aliases)] + body[idx:]
+        else:
+            node.body = body
         return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
@@ -98,42 +108,65 @@ class _CosmeticStripper(ast.NodeTransformer):
 
 
 class _IsomorphicNormalizer(_CosmeticStripper):
-    """Tier 1 Normalizer: strips type annotations and canonicalizes function-local
+    """Tier 1 Normalizer (v2 Hardened):
 
-    variable bindings to positional De Bruijn indices (__local_0, __local_1).
-    External/global calls remain untouched.
+    - P0-1 Fix: Preserves public keyword-callable parameter names (args.args and args.kwonlyargs);
+      only alpha-normalizes posonlyargs and strictly internal function-local variables.
+    - P0-3 Fix: Preserves AnnAssign inside ClassDef and Module scopes; strips AnnAssign ONLY
+      inside function scopes.
+    - P1-1 Fix: Respects 'global' and 'nonlocal' declarations and pins read-before-write names.
     """
 
     def __init__(self) -> None:
         super().__init__()
         self._scope_stack: list[dict[str, str]] = []
+        self._pinned_names_stack: list[set[str]] = []
+
+    def _in_function_scope(self) -> bool:
+        return operator.gt(len(self._scope_stack), 0)
 
     def _canonical_local(self, name: str, allow_bind: bool) -> str:
         if not self._scope_stack:
             return name
         scope = self._scope_stack[-1]
+        pinned = self._pinned_names_stack[-1]
+        if name in pinned:
+            return name
         if name in scope:
             return scope[name]
         if allow_bind:
             canon = f"__local_{len(scope)}"
             scope[name] = canon
             return canon
+        pinned.add(name)
         return name
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+    def _collect_pinned_declarations(self, body: list[ast.stmt]) -> set[str]:
+        pinned: set[str] = set()
+        for stmt in body:
+            for sub in ast.walk(stmt):
+                if isinstance(sub, (ast.Global, ast.Nonlocal)):
+                    pinned.update(sub.names)
+        return pinned
+
+    def _visit_callable(self, node: Any) -> Any:
         node.returns = None
         scope: dict[str, str] = {}
+        pinned = self._collect_pinned_declarations(node.body)
+        for arg in node.args.args + node.args.kwonlyargs:
+            arg.annotation = None
+            pinned.add(arg.arg)
+        if node.args.vararg:
+            node.args.vararg.annotation = None
+        if node.args.kwarg:
+            node.args.kwarg.annotation = None
+
         self._scope_stack.append(scope)
+        self._pinned_names_stack.append(pinned)
         try:
-            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
-                arg.annotation = None
-                arg.arg = self._canonical_local(arg.arg, allow_bind=True)
-            if node.args.vararg:
-                node.args.vararg.annotation = None
-                node.args.vararg.arg = self._canonical_local(node.args.vararg.arg, allow_bind=True)
-            if node.args.kwarg:
-                node.args.kwarg.annotation = None
-                node.args.kwarg.arg = self._canonical_local(node.args.kwarg.arg, allow_bind=True)
+            for pos_arg in node.args.posonlyargs:
+                pos_arg.annotation = None
+                pos_arg.arg = self._canonical_local(pos_arg.arg, allow_bind=True)
             node.body = self._strip_docstring(node.body)
             new_body: list[ast.stmt] = []
             for stmt in node.body:
@@ -143,12 +176,18 @@ class _IsomorphicNormalizer(_CosmeticStripper):
             node.body = new_body or [ast.Pass()]
         finally:
             self._scope_stack.pop()
+            self._pinned_names_stack.pop()
         return node
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        return self._visit_callable(node)
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
-        return self.visit_FunctionDef(node)  # type: ignore[arg-type]
+        return self._visit_callable(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.AST:
+        if not self._in_function_scope():
+            return self.generic_visit(node)
         if node.value is None:
             return ast.Pass()
         target = self.visit(node.target)
@@ -291,7 +330,7 @@ def partition_pull_request(file_pairs: Sequence[tuple[str, str, str]]) -> Antiqu
             }
             for v in verdicts
         ],
-        "v": "antique-rfc8785-v1",
+        "v": "antique-rfc8785-v2",
     }
     digest = rfc8785_sha256(canonical_payload)
     return AntiquePartitionReceipt(
