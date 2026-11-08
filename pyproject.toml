@@ -28,6 +28,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+git-antique = "git_antique.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
@@ -45,3 +48,4 @@ python_files = ["test_*.py"]
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+
