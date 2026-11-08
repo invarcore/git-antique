@@ -91,7 +91,10 @@ def render_antique_markdown_summary(receipt: AntiquePartitionReceipt) -> str:
     return nl.join(lines)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    runner: Callable[[Sequence[str], str], bytes] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(description="git-antique deterministic semantic diff router")
     parser.add_argument("--repo", default=".", help="Path to Git repository")
     parser.add_argument("--base", default="main", help="Base Git revision")
@@ -99,7 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
     args = parser.parse_args(argv)
 
-    pairs = collect_git_branch_python_pairs(args.repo, args.base, args.head)
+    pairs = collect_git_branch_python_pairs(args.repo, args.base, args.head, runner=runner)
     receipt = partition_pull_request(pairs)
     if args.format == "json":
         print(json.dumps(asdict(receipt), indent=2))

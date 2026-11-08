@@ -113,14 +113,23 @@ def test_render_antique_markdown_summary() -> None:
     assert "| `src/policy.py` | `SEMANTIC_LOGIC_MUTATION` |" in md
 
 
-def test_main_cli_markdown_and_json(capsys, monkeypatch) -> None:
-    # Use real git repo of git-antique
-    exit_code = main(["--base", "HEAD~1", "--head", "HEAD", "--format", "markdown"])
+def test_main_cli_markdown_and_json(capsys) -> None:
+    def fake_git(cmd, cwd: str) -> bytes:
+        if "diff" in cmd:
+            return b"src/app.py" + bytes([0])
+        return b"def run(): pass\n"
+
+    exit_code = main(["--base", "main", "--head", "HEAD", "--format", "markdown"], runner=fake_git)
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "git-antique Semantic Diff Receipt" in captured.out
+    assert "| `src/app.py` |" in captured.out
 
-    exit_code_json = main(["--base", "HEAD~1", "--head", "HEAD", "--format", "json"])
+    exit_code_json = main(["--base", "main", "--head", "HEAD", "--format", "json"], runner=fake_git)
     assert exit_code_json == 0
     captured_json = capsys.readouterr()
     assert '"receipt_id":' in captured_json.out
+
+    # Test default subprocess runner path on current checkout HEAD vs HEAD (works on shallow clones)
+    exit_code_real = main(["--base", "HEAD", "--head", "HEAD", "--format", "markdown"])
+    assert exit_code_real == 0
