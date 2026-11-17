@@ -113,6 +113,12 @@ If a PR modifies non-Python files (e.g. modifying `.github/workflows/ci.yml` or 
 ### 4. RFC 8785 Canonical JSON Receipts
 Every evaluation produces a tamper-evident `@antique_receipt:sha256:...` generated via RFC 8785 deterministic JSON canonicalization.
 
+### 5. P0-4: Docstring Decorator Pin on Schema-Bound Callables & Classes
+Docstrings attached to schema-bound functions or classes (e.g. `@mcp.tool`, `@click.command`, `@app.get`, `@router.post`, `@dataclass`, `@pydantic.*`) define LLM runtime schemas and prompt injection vectors (ETUDE). `git-antique` pins schema docstrings and escalates any modification to `SEMANTIC_LOGIC_MUTATION`.
+
+### 6. P0-5: Reflection Guard on Dynamic Scope Calls
+Functions executing runtime reflection calls (`locals()`, `vars()`, `dir()`, `eval()`, `exec()`, `sys._getframe()`, `inspect.currentframe()`) block local alpha-renaming and fail closed to `SEMANTIC_LOGIC_MUTATION`, preventing scope-leak regressions.
+
 ---
 
 ## 💻 CLI Usage & Arguments
