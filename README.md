@@ -1,7 +1,7 @@
 # git-antique
 
 <p align="center">
-  <strong>Deterministic Semantic AST Diff Router & Cryptographic Receipt Generator for Multi-Agent Pull Requests.</strong><br>
+  <strong>Deterministic Semantic AST Diff Router & Deterministic AST Partitioner with Decorator-Docstring and Frame-Reflection Guards for Multi-Agent Pull Requests.</strong><br>
   Eliminates the 80% Agent Review Bottleneck &bull; Two-Tier Semantic AST Partitioning &bull; RFC 8785 Canonical Receipts &bull; CVE-2026-85626 Safe Ref Firewall
 </p>
 
@@ -40,7 +40,7 @@ pip install git-antique
 | `src/models/user.py` | `STRUCTURAL_ISOMORPHIC` | 94 | 0 |
 ```
 
-If an autonomous agent merely reformatted docstrings, sorted imports, and performed alpha-renaming on local variables, `git-antique` proves mathematically that zero semantic logic mutated. Your CI pipeline auto-approves the PR in **sub-millisecond time**.
+If an autonomous agent merely reformatted non-schema docstrings, sorted imports, and performed alpha-renaming on non-reflecting local variables, `git-antique`'s deterministic AST partitioner with decorator-docstring and frame-reflection guards proves that zero semantic logic mutated. Your CI pipeline auto-approves the PR in **sub-millisecond time**.
 
 ---
 

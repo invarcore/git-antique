@@ -55,12 +55,103 @@ def rfc8785_sha256(payload: Any) -> str:
     return hashlib.sha256(rfc8785_canonical_bytes(payload)).hexdigest()
 
 
+_DECORATED_SCHEMA_PREFIXES: tuple[str, ...] = (
+    "mcp.tool",
+    "server.tool",
+    "tool",
+    "click.",
+    "app.",
+    "router.",
+    "FastMCP",
+)
+
+_REFLECTION_CALLS: tuple[str, ...] = (
+    "locals",
+    "vars",
+    "dir",
+    "eval",
+    "exec",
+    "getattr",
+    "setattr",
+)
+
+
+def _get_decorator_name(dec: ast.AST) -> str:
+    target = dec.func if isinstance(dec, ast.Call) else dec
+    parts: list[str] = []
+    curr = target
+    while isinstance(curr, ast.Attribute):
+        parts.append(curr.attr)
+        curr = curr.value
+    if isinstance(curr, ast.Name):
+        parts.append(curr.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def _is_schema_bound_decorator(dec: ast.AST) -> bool:
+    name = _get_decorator_name(dec)
+    if not name:
+        return False
+    for prefix in _DECORATED_SCHEMA_PREFIXES:
+        if prefix.endswith("."):
+            if name.startswith(prefix):
+                return True
+        else:
+            if name == prefix or name.startswith(f"{prefix}."):
+                return True
+    return False
+
+
+def _has_schema_bound_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    return any(_is_schema_bound_decorator(dec) for dec in node.decorator_list)
+
+
+def _has_reflection_calls(body: list[ast.stmt]) -> bool:
+    for stmt in body:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Call):
+                target = node.func
+                name = ""
+                if isinstance(target, ast.Name):
+                    name = target.id
+                elif isinstance(target, ast.Attribute):
+                    name = target.attr
+                if name in _REFLECTION_CALLS:
+                    return True
+    return False
+
+
+def _detect_schema_docstring_mutation(before_src: str, after_src: str) -> bool:
+    try:
+        t_before = ast.parse(before_src)
+        t_after = ast.parse(after_src)
+    except Exception:  # noqa: BLE001
+        return False
+
+    def _collect_schema_docs(tree: ast.AST) -> dict[str, str | None]:
+        docs: dict[str, str | None] = {}
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _has_schema_bound_decorator(n):
+                docs[n.name] = ast.get_docstring(n)
+        return docs
+
+    docs_before = _collect_schema_docs(t_before)
+    docs_after = _collect_schema_docs(t_after)
+
+    for name, doc_b in docs_before.items():
+        if name in docs_after and docs_after[name] != doc_b:
+            return True
+    return False
+
+
 class _CosmeticStripper(ast.NodeTransformer):
     """Tier 0 Normalizer (v2 Hardened):
 
-    - Strips module/class/function docstrings.
+    - Strips module/class/function docstrings (except schema-bound decorated functions).
     - Sorts ONLY contiguous leading top-level Import statements at the start of a module
       (P0-2 fix: never hoists late imports across executable statements with side effects).
+    - P0-4: Docstring decorator pin on schema-bound decorated functions.
     """
 
     def _strip_docstring(self, body: list[ast.stmt]) -> list[ast.stmt]:
@@ -93,12 +184,14 @@ class _CosmeticStripper(ast.NodeTransformer):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
         self.generic_visit(node)
-        node.body = self._strip_docstring(node.body)
+        if not _has_schema_bound_decorator(node):
+            node.body = self._strip_docstring(node.body)
         return node
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
         self.generic_visit(node)
-        node.body = self._strip_docstring(node.body)
+        if not _has_schema_bound_decorator(node):
+            node.body = self._strip_docstring(node.body)
         return node
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
@@ -114,11 +207,14 @@ class _IsomorphicNormalizer(_CosmeticStripper):
       only alpha-normalizes posonlyargs and strictly internal function-local variables.
     - P0-3 Fix: Preserves AnnAssign inside ClassDef and Module scopes; strips AnnAssign ONLY
       inside function scopes.
+    - P0-4 Fix: Docstring decorator pin on schema-bound callables (mcp, click, app, router).
+    - P0-5 Fix: Reflection guard blocks local alpha-renaming when locals(), vars(), eval() etc. are called.
     - P1-1 Fix: Respects 'global' and 'nonlocal' declarations and pins read-before-write names.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, guard_reflection: bool = True) -> None:
         super().__init__()
+        self.guard_reflection = guard_reflection
         self._scope_stack: list[dict[str, str]] = []
         self._pinned_names_stack: list[set[str]] = []
 
@@ -161,13 +257,22 @@ class _IsomorphicNormalizer(_CosmeticStripper):
         if node.args.kwarg:
             node.args.kwarg.annotation = None
 
+        if self.guard_reflection and _has_reflection_calls(node.body):
+            for stmt in node.body:
+                for sub in ast.walk(stmt):
+                    if isinstance(sub, ast.Name):
+                        pinned.add(sub.id)
+                    elif isinstance(sub, ast.arg):
+                        pinned.add(sub.arg)
+
         self._scope_stack.append(scope)
         self._pinned_names_stack.append(pinned)
         try:
             for pos_arg in node.args.posonlyargs:
                 pos_arg.annotation = None
                 pos_arg.arg = self._canonical_local(pos_arg.arg, allow_bind=True)
-            node.body = self._strip_docstring(node.body)
+            if not _has_schema_bound_decorator(node):
+                node.body = self._strip_docstring(node.body)
             new_body: list[ast.stmt] = []
             for stmt in node.body:
                 visited = self.visit(stmt)
@@ -200,13 +305,13 @@ class _IsomorphicNormalizer(_CosmeticStripper):
         return node
 
 
-def ast_canonical_dump(source: str, tier: int) -> str:
+def ast_canonical_dump(source: str, tier: int, guard_reflection: bool = True) -> str:
     """Return canonical AST string for Tier 0 (cosmetic) or Tier 1 (isomorphic)."""
     tree = ast.parse(nfc_normalize(source))
     if tier == 0:
         transformed = _CosmeticStripper().visit(copy.deepcopy(tree))
     else:
-        transformed = _IsomorphicNormalizer().visit(copy.deepcopy(tree))
+        transformed = _IsomorphicNormalizer(guard_reflection=guard_reflection).visit(copy.deepcopy(tree))
     ast.fix_missing_locations(transformed)
     return ast.dump(transformed, annotate_fields=True, include_attributes=False)
 
@@ -221,6 +326,7 @@ class FilePartitionVerdict:
     after_sha256: str
     tier0_ast_digest: str
     tier1_ast_digest: str
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +418,18 @@ def classify_python_file_diff(filepath: str, before_src: str, after_src: str) ->
             tier1_ast_digest=t1_digest,
         )
 
+    reason: str | None = None
+    if _detect_schema_docstring_mutation(norm_before, norm_after):
+        reason = "P0-4: docstring mutation on schema-bound decorated function"
+    else:
+        try:
+            t1_noguard_before = ast_canonical_dump(norm_before, tier=1, guard_reflection=False)
+            t1_noguard_after = ast_canonical_dump(norm_after, tier=1, guard_reflection=False)
+            if t1_noguard_before == t1_noguard_after:
+                reason = "P0-5: local alpha-renaming blocked due to runtime reflection call"
+        except Exception:  # noqa: BLE001, S110
+            pass
+
     return FilePartitionVerdict(
         filepath=filepath,
         classification="SEMANTIC_LOGIC_MUTATION",
@@ -321,6 +439,7 @@ def classify_python_file_diff(filepath: str, before_src: str, after_src: str) ->
         after_sha256=after_sha,
         tier0_ast_digest=t0_digest,
         tier1_ast_digest=t1_digest,
+        reason=reason,
     )
 
 
