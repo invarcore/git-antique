@@ -81,3 +81,39 @@ def test_p0_5_reflection_function_without_rename_stays_isomorphic_or_cosmetic() 
     verdict = classify_python_file_diff("src/calc.py", before, after)
     assert verdict.classification == "STRUCTURAL_ISOMORPHIC"
     assert verdict.human_attention_lines == 0
+
+
+def test_p0_4_schema_bound_class_docstring_mutation_escalates() -> None:
+    decorators = ["@dataclass", "@pydantic.dataclass", "@pydantic.validate_arguments"]
+    for dec in decorators:
+        before = f"{dec}\nclass ConfigModel:\n    '''Original schema config.'''\n    port: int = 8080\n"
+        after = f"{dec}\nclass ConfigModel:\n    '''Mutated schema config (ETUDE vector).'''\n    port: int = 8080\n"
+        verdict = classify_python_file_diff("src/models.py", before, after)
+        assert verdict.classification == "SEMANTIC_LOGIC_MUTATION", f"Failed for decorator {dec}"
+        assert verdict.reason == "P0-4: docstring mutation on schema-bound decorated function"
+        assert verdict.human_attention_lines == verdict.changed_lines
+
+
+def test_p0_5_reflection_guard_sys_getframe_and_currentframe() -> None:
+    calls = [
+        "sys._getframe().f_locals",
+        "_getframe()",
+        "inspect.currentframe()",
+        "currentframe()",
+    ]
+    for ref_call in calls:
+        before = f"def inspect_runtime(items, /):\n    x = items[0]\n    {ref_call}\n    return x\n"
+        after = f"def inspect_runtime(items, /):\n    renamed_x = items[0]\n    {ref_call}\n    return renamed_x\n"
+        verdict = classify_python_file_diff("src/frame.py", before, after)
+        assert verdict.classification == "SEMANTIC_LOGIC_MUTATION", f"Failed for call {ref_call}"
+        assert verdict.reason == "P0-5: local alpha-renaming blocked due to runtime reflection call"
+
+
+def test_p0_5_reflection_guard_avoids_false_positive_on_custom_methods() -> None:
+    # A custom object calling .get_data() or .custom_eval() should NOT trigger reflection guard if renamed cleanly
+    before = "def compute(items, /):\n    temp = items[0]\n    obj.custom_eval(temp)\n    return temp\n"
+    after = "def compute(items, /):\n    renamed_temp = items[0]\n    obj.custom_eval(renamed_temp)\n    return renamed_temp\n"
+    verdict = classify_python_file_diff("src/custom.py", before, after)
+    assert verdict.classification == "STRUCTURAL_ISOMORPHIC"
+    assert verdict.human_attention_lines == 0
+

@@ -63,6 +63,8 @@ _DECORATED_SCHEMA_PREFIXES: tuple[str, ...] = (
     "app.",
     "router.",
     "FastMCP",
+    "pydantic.",
+    "dataclass",
 )
 
 _REFLECTION_CALLS: tuple[str, ...] = (
@@ -73,6 +75,8 @@ _REFLECTION_CALLS: tuple[str, ...] = (
     "exec",
     "getattr",
     "setattr",
+    "_getframe",
+    "currentframe",
 )
 
 
@@ -103,7 +107,7 @@ def _is_schema_bound_decorator(dec: ast.AST) -> bool:
     return False
 
 
-def _has_schema_bound_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _has_schema_bound_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> bool:
     return any(_is_schema_bound_decorator(dec) for dec in node.decorator_list)
 
 
@@ -115,7 +119,10 @@ def _has_reflection_calls(body: list[ast.stmt]) -> bool:
                 name = ""
                 if isinstance(target, ast.Name):
                     name = target.id
-                elif isinstance(target, ast.Attribute):
+                elif isinstance(target, ast.Attribute) and (
+                    (isinstance(target.value, ast.Name) and target.value.id in ("builtins", "sys", "inspect"))
+                    or target.attr in ("locals", "vars", "dir", "_getframe", "currentframe")
+                ):
                     name = target.attr
                 if name in _REFLECTION_CALLS:
                     return True
@@ -132,7 +139,7 @@ def _detect_schema_docstring_mutation(before_src: str, after_src: str) -> bool:
     def _collect_schema_docs(tree: ast.AST) -> dict[str, str | None]:
         docs: dict[str, str | None] = {}
         for n in ast.walk(tree):
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _has_schema_bound_decorator(n):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and _has_schema_bound_decorator(n):
                 docs[n.name] = ast.get_docstring(n)
         return docs
 
@@ -196,7 +203,8 @@ class _CosmeticStripper(ast.NodeTransformer):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
         self.generic_visit(node)
-        node.body = self._strip_docstring(node.body)
+        if not _has_schema_bound_decorator(node):
+            node.body = self._strip_docstring(node.body)
         return node
 
 
