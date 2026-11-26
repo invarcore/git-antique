@@ -17,7 +17,9 @@ def test_p0_4_mcp_tool_docstring_mutation_escalates_to_semantic() -> None:
         "@FastMCP.tool()",
     ]
     for dec in prefixes:
-        before = f"{dec}\ndef handle_req(param: int) -> int:\n    '''Original schema description.'''\n    return param * 2\n"
+        before = (
+            f"{dec}\ndef handle_req(param: int) -> int:\n    '''Original schema description.'''\n    return param * 2\n"
+        )
         after = f"{dec}\ndef handle_req(param: int) -> int:\n    '''Mutated schema description (ETUDE vector).'''\n    return param * 2\n"
         verdict = classify_python_file_diff("src/tool.py", before, after)
         assert verdict.classification == "SEMANTIC_LOGIC_MUTATION", f"Failed for decorator {dec}"
@@ -41,7 +43,9 @@ def test_p0_4_undecorated_and_non_schema_docstring_mutation_stays_cosmetic() -> 
 
 
 def test_p0_4_schema_bound_function_whitespace_and_comments_stay_cosmetic() -> None:
-    before = "@mcp.tool()\ndef compute(val: int) -> int:\n    '''Fixed docstring.'''\n    # Comment A\n    return val * 2\n"
+    before = (
+        "@mcp.tool()\ndef compute(val: int) -> int:\n    '''Fixed docstring.'''\n    # Comment A\n    return val * 2\n"
+    )
     after = "@mcp.tool()\ndef compute(val: int) -> int:\n    '''Fixed docstring.'''\n    # Comment B with formatting\n    return val   *   2\n"
     verdict = classify_python_file_diff("src/tool.py", before, after)
     assert verdict.classification == "TRIVIAL_COSMETIC"
@@ -68,7 +72,9 @@ def test_p0_5_reflection_guard_escalates_local_alpha_rename() -> None:
 
 
 def test_p0_5_pure_function_alpha_rename_stays_isomorphic() -> None:
-    before = "def pure_compute(items, /):\n    total = 0\n    for val in items:\n        total += val\n    return total\n"
+    before = (
+        "def pure_compute(items, /):\n    total = 0\n    for val in items:\n        total += val\n    return total\n"
+    )
     after = "def pure_compute(items, /):\n    running_sum = 0\n    for val in items:\n        running_sum += val\n    return running_sum\n"
     verdict = classify_python_file_diff("src/calc.py", before, after)
     assert verdict.classification == "STRUCTURAL_ISOMORPHIC"
@@ -116,4 +122,3 @@ def test_p0_5_reflection_guard_avoids_false_positive_on_custom_methods() -> None
     verdict = classify_python_file_diff("src/custom.py", before, after)
     assert verdict.classification == "STRUCTURAL_ISOMORPHIC"
     assert verdict.human_attention_lines == 0
-

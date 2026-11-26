@@ -21,10 +21,10 @@ Install via `pip` or run instantaneously with Astral `uv`:
 
 ```bash
 # Run directly against your current Git branch vs. main
-uv tool run git-antique --base main --head HEAD
+uv tool run --from "git+https://github.com/invarcore/git-antique.git" git-antique --base main --head HEAD
 
-# Or install in your development environment
-pip install git-antique
+# Or install from source in your development environment
+pip install "git+https://github.com/invarcore/git-antique.git"
 ```
 
 ### Sample Output (Markdown Partition Receipt)
