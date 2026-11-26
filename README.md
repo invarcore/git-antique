@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Deterministic Semantic AST Diff Router & Deterministic AST Partitioner with Decorator-Docstring and Frame-Reflection Guards for Multi-Agent Pull Requests.</strong><br>
-  Eliminates the 80% Agent Review Bottleneck &bull; Two-Tier Semantic AST Partitioning &bull; RFC 8785 Canonical Receipts &bull; CVE-2026-85626 Safe Ref Firewall
+  Two-Tier Semantic AST Partitioning &bull; RFC 8785 Canonical Receipts &bull; CVE-2026-85626 Safe Ref Firewall
 </p>
 
 <p align="center">
@@ -44,7 +44,7 @@ If an autonomous agent merely reformatted non-schema docstrings, sorted imports,
 
 ---
 
-## 🚨 The Problem: The 80% Human Review Agent Bottleneck
+## 🚨 The Problem: The Human Review Agent Bottleneck
 
 Autonomous coding agents (Devin, SWE-bench bots, Claude Code, Cursor Composer) can generate hundreds of Pull Requests per day. However, **human engineering attention does not scale linearly**:
 
